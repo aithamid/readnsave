@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -20,11 +21,27 @@ type Book struct {
 	TotalPages  int    `json:"totalPages"`
 }
 
+type Login struct {
+	HashedPassword string
+	SessionToken   string
+	CSRFToken      string
+}
+
+var users = map[string]Login{}
+
 // Books slice to seed record book data.
 var books = []Book{
 	{ID: "1", Title: "Blue Train", Author: "John Coltrane", CurrentPage: 56, TotalPages: 100},
 	{ID: "2", Title: "Jeru", Author: "Gerry Mulligan", CurrentPage: 56, TotalPages: 100},
 	{ID: "3", Title: "Sarah Vaughan and Clifford Brown", CurrentPage: 56, TotalPages: 100},
+}
+
+func HashedPassword(password string) string {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(hashedPassword)
 }
 
 // InitializeDatabase initializes the database with the required tables.
@@ -181,6 +198,31 @@ func connectDB() *gorm.DB {
 	return db
 }
 
+func register(c *gin.Context) {
+	username := c.PostForm("username")
+	password := c.PostForm("password")
+	email := c.PostForm("email")
+
+	if len(username) == 0 || len(password) == 0 || len(email) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide username, password and email"})
+		return
+	}
+
+	// check if user already exists
+	if _, ok := users[username]; ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
+		return
+	}
+
+	hashedPassword := HashedPassword(password)
+	users[username] = Login{HashedPassword: hashedPassword}
+
+	// print user
+	fmt.Println(users)
+	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
+
+}
+
 func main() {
 	// Connect to the database
 	db := connectDB()
@@ -196,6 +238,10 @@ func main() {
 	router.DELETE("/books/:id", deleteBook)
 	router.POST("/init-db", InitializeDatabase(db)) // Pass db to InitializeDatabase
 	router.POST("/reset-db", ResetDatabase(db))     // Pass db to ResetDatabase
+	// router.POST("/login", login)
+	router.POST("/register", register)
+	// router.POST("/logout", logout)
+	// router.POST("/protected", protected)
 
 	// Start the server
 	serverPort := os.Getenv("SERVER_PORT")
