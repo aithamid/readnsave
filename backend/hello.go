@@ -7,9 +7,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"golang.org/x/crypto/bcrypt"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"crypto/rand"
+	"encoding/base64"
+	"log"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Book represents data about a book.
@@ -42,6 +48,19 @@ func HashedPassword(password string) string {
 		panic(err)
 	}
 	return string(hashedPassword)
+}
+
+func ComparePassword(password, hashedPassword string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	return err == nil
+}
+
+func GenerateToken(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("error while generating token: %v", err)
+	}
+	return base64.URLEncoding.EncodeToString(b)
 }
 
 // InitializeDatabase initializes the database with the required tables.
@@ -220,6 +239,38 @@ func register(c *gin.Context) {
 	// print user
 	fmt.Println(users)
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
+}
+
+func login(c *gin.Context) {
+	username := c.PostForm("username")
+	password := c.PostForm("password")
+
+	if len(username) == 0 || len(password) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide username and password"})
+		return
+	}
+
+	// check if user exists
+	user, ok := users[username]
+	if !ok || !ComparePassword(password, user.HashedPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or password"})
+		return
+	}
+
+	// generate session token
+	sessionToken := GenerateToken(32)
+	csrfToken := GenerateToken(32)
+
+	// set session cookie
+	c.SetCookie("session_token", sessionToken, 3600*24, "/", "localhost", false, true)
+	c.SetCookie("csrf_token", csrfToken, 3600*24, "/", "localhost", false, false)
+
+	// save session token
+	user.SessionToken = sessionToken
+	user.CSRFToken = csrfToken
+	users[username] = user
+
+	c.JSON(http.StatusOK, gin.H{"message": "User logged in successfully"})
 
 }
 
@@ -238,7 +289,7 @@ func main() {
 	router.DELETE("/books/:id", deleteBook)
 	router.POST("/init-db", InitializeDatabase(db)) // Pass db to InitializeDatabase
 	router.POST("/reset-db", ResetDatabase(db))     // Pass db to ResetDatabase
-	// router.POST("/login", login)
+	router.POST("/login", login)
 	router.POST("/register", register)
 	// router.POST("/logout", logout)
 	// router.POST("/protected", protected)
