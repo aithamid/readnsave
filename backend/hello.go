@@ -220,9 +220,8 @@ func connectDB() *gorm.DB {
 func register(c *gin.Context) {
 	username := c.PostForm("username")
 	password := c.PostForm("password")
-	email := c.PostForm("email")
 
-	if len(username) == 0 || len(password) == 0 || len(email) == 0 {
+	if len(username) == 0 || len(password) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide username, password and email"})
 		return
 	}
@@ -274,6 +273,37 @@ func login(c *gin.Context) {
 
 }
 
+func protected(c *gin.Context) {
+	if err := Authorize(c); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	username := c.PostForm("username")
+	// CRSF validation successful ! Welcome user
+	c.JSON(http.StatusOK, gin.H{"message": "Welcome " + username})
+}
+
+func logout(c *gin.Context) {
+	if err := Authorize(c); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Clear cookies
+	c.SetCookie("session_token", "", -1, "/", "localhost", false, true)
+	c.SetCookie("csrf_token", "", -1, "/", "localhost", false, false)
+
+	// Clear the tokens from the database
+	username := c.PostForm("username")
+	user, _ := users[username]
+	user.SessionToken = ""
+	user.CSRFToken = ""
+	users[username] = user
+
+	c.JSON(http.StatusOK, gin.H{"message": "User logged out successfully"})
+}
+
 func main() {
 	// Connect to the database
 	db := connectDB()
@@ -291,8 +321,8 @@ func main() {
 	router.POST("/reset-db", ResetDatabase(db))     // Pass db to ResetDatabase
 	router.POST("/login", login)
 	router.POST("/register", register)
-	// router.POST("/logout", logout)
-	// router.POST("/protected", protected)
+	router.POST("/protected", protected)
+	router.POST("/logout", logout)
 
 	// Start the server
 	serverPort := os.Getenv("SERVER_PORT")
